@@ -31,4 +31,12 @@ dict_promptmode_to_prompt = {
     # "prompt_table_html": """Convert the table in this image to HTML.""",
     # "prompt_table_latex": """Convert the table in this image to LaTeX.""",
     # "prompt_formula_latex": """Convert the formula in this image to LaTeX.""",
+
+    "prompt_ocr_markdown": """请将图片中的文档内容按阅读顺序转换为 Markdown。
+    要求：
+    1. 保留原文语言，不翻译；
+    2. 标题、列表、段落结构清晰；
+    3. 表格尽量用 Markdown 表格，复杂表格可用 HTML；
+    4. 公式用 LaTeX；
+    5. 不要输出解释文字，只输出最终 Markdown。""",
 }

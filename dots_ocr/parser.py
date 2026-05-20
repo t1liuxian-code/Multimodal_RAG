@@ -4,7 +4,7 @@ from typing import Optional, Tuple
 
 from tqdm import tqdm
 from multiprocessing.pool import ThreadPool
-from dots_ocr.inference import inference_with_vllm
+from dots_ocr.inference import inference_with_vllm, inference_with_bailian_ocr
 from dots_ocr.utils.consts import image_extensions, MIN_PIXELS, MAX_PIXELS
 from dots_ocr.utils.image_utils import get_image_by_fitz_doc, fetch_image, smart_resize
 from dots_ocr.utils.doc_utils import fitz_doc_to_image, load_images_from_pdf
@@ -31,7 +31,9 @@ class DotsOCRParser:
                  output_dir="./output",  # 默认输出目录
                  min_pixels=None,  # 图像最小像素数限制
                  max_pixels=None,  # 图像最大像素数限制
-                 use_hf=False,  # 是否使用HuggingFace模型而不是VLLM
+                 use_hf=True,  # 是否使用HuggingFace模型而不是VLLM
+
+                 backend="vllm",  # 新增
                  ):
         # 初始化图像处理参数
         self.dpi = dpi
@@ -51,6 +53,7 @@ class DotsOCRParser:
         self.output_dir = output_dir
         self.min_pixels = min_pixels
         self.max_pixels = max_pixels
+        self.backend = backend
 
         # 模型类型选择
         self.use_hf = use_hf
@@ -58,6 +61,8 @@ class DotsOCRParser:
             # 使用HuggingFace模型时线程数设置为1
             self._load_hf_model()
             print(f"使用HuggingFace模型，线程数将设置为1")
+        elif self.backend == "bailian_ocr":
+            print(f"使用百炼OCR API，线程数将设置为{self.num_thread}")
         else:
             print(f"使用VLLM模型，线程数将设置为{self.num_thread}")
 
@@ -65,22 +70,39 @@ class DotsOCRParser:
         assert self.min_pixels is None or self.min_pixels >= MIN_PIXELS
         assert self.max_pixels is None or self.max_pixels <= MAX_PIXELS
 
+    def _inference_with_bailian(self, image, prompt):
+        return inference_with_bailian_ocr(
+            image=image,
+            prompt=prompt,
+            model_name=self.model_name,
+            temperature=self.temperature,
+            top_p=self.top_p,
+            max_completion_tokens=self.max_completion_tokens,
+        )
+
     def _load_hf_model(self):
-        pass
-        # import torch
-        # from transformers import AutoModelForCausalLM, AutoProcessor, AutoTokenizer
-        # from qwen_vl_utils import process_vision_info
-        #
-        # model_path = "./weights/DotsOCR"
-        # self.model = AutoModelForCausalLM.from_pretrained(
-        #     model_path,
-        #     attn_implementation="flash_attention_2",
-        #     torch_dtype=torch.bfloat16,
-        #     device_map="auto",
-        #     trust_remote_code=True
-        # )
-        # self.processor = AutoProcessor.from_pretrained(model_path, trust_remote_code=True, use_fast=True)
-        # self.process_vision_info = process_vision_info
+        import torch
+        from transformers import AutoModelForCausalLM, AutoProcessor
+        from qwen_vl_utils import process_vision_info
+
+        model_path = "rednote-hilab/dots.ocr"
+
+        print(f"正在从HuggingFace下载模型: {model_path} (强制纯 CPU 模式)")
+        self.model = AutoModelForCausalLM.from_pretrained(
+            model_path,
+            # 移除 attn_implementation="flash_attention_2" (强依赖CUDA)
+            # 移除 device_map="auto"
+            torch_dtype=torch.float32,  # CPU 推理通常使用 float32 比较稳定
+            trust_remote_code=True
+        ).to("cpu")  # 强制将模型加载到 CPU
+
+        self.processor = AutoProcessor.from_pretrained(
+            model_path,
+            trust_remote_code=True,
+            use_fast=True
+        )
+        self.process_vision_info = process_vision_info
+        print("模型下载并加载完成")
 
     def _inference_with_hf(self, image, prompt):
         messages = [
@@ -111,10 +133,12 @@ class DotsOCRParser:
             return_tensors="pt",
         )
 
-        inputs = inputs.to("cuda")
+        # 改为推入 CPU
+        inputs = inputs.to("cpu")
 
-        # Inference: Generation of the output
-        generated_ids = self.model.generate(**inputs, max_new_tokens=24000)
+        # 必须大幅度调小 max_new_tokens！24000 会直接撑爆内存
+        # 建议改为 2048 或 4096
+        generated_ids = self.model.generate(**inputs, max_new_tokens=2048)
         generated_ids_trimmed = [
             out_ids[len(in_ids):] for in_ids, out_ids in zip(inputs.input_ids, generated_ids)
         ]
@@ -228,8 +252,12 @@ class DotsOCRParser:
         if self.use_hf:
             response = self._inference_with_hf(image, prompt)
             print("使用HuggingFace模型")
+        elif self.backend == "bailian_ocr":
+            response = self._inference_with_bailian(image, prompt)
+            print("使用百炼OCR API")
         else:
             response = self._inference_with_vllm(image, prompt)
+            print("使用VLLM模型")
 
         # 初始化结果字典
         result = {
@@ -486,7 +514,9 @@ def do_parse(
         no_fitz_preprocess: bool = False,
         min_pixels: Optional[int] = None,
         max_pixels: Optional[int] = None,
-        use_hf: bool = False
+        use_hf: bool = False,
+
+        backend: str = "vllm", # 新增
 ):
     """
     dots.ocr 多语言文档布局解析器
@@ -530,6 +560,8 @@ def do_parse(
         min_pixels=min_pixels,
         max_pixels=max_pixels,
         use_hf=use_hf,
+
+        backend=backend,  # 新增
     )
 
     # 设置Fitz预处理标志
@@ -552,4 +584,4 @@ if __name__ == "__main__":
     # main()
     # do_parse(input_path='../demo_image1.jpg')
     # do_parse(input_path='../demo_pdf1.pdf', num_thread=32)
-    do_parse(input_path='../第一章 Apache Flink 概述.pdf', num_thread=32, no_fitz_preprocess=True)
+    do_parse(input_path='../第一章 Apache Flink 概述.pdf', num_thread=32, no_fitz_preprocess=True,use_hf=True)

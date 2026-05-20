@@ -10,7 +10,7 @@ from utils.common_utils import delete_directory_if_non_empty, get_filename, get_
 from utils.log_utils import log
 
 # md存储的临时模型
-base_md_dir = r'E:\my_project\Multimodal_RAG\output'
+base_md_dir = r'D:\code\Multimodal_RAG\output'
 
 
 class ProcessorAPP:
@@ -40,7 +40,16 @@ class ProcessorAPP:
         """解析pdf文件，变成多个md文件"""
         md_files_dir = os.path.join(base_md_dir, get_filename(self.pdf_path, False))
         delete_directory_if_non_empty(md_files_dir)
-        do_parse(input_path=self.pdf_path, num_thread=32, no_fitz_preprocess=True)
+        # do_parse(input_path=self.pdf_path, num_thread=32, no_fitz_preprocess=True)
+        do_parse(
+            input_path=self.pdf_path,
+            num_thread=32,
+            no_fitz_preprocess=True,
+            backend="bailian_ocr",
+            model_name="qwen-vl-ocr-latest",
+            prompt="prompt_ocr_markdown",
+            use_hf=False,
+        )
         if os.path.isdir(md_files_dir):
             self.md_dir = md_files_dir
             log.info(f"PDF已解析，生成了{len(os.listdir(md_files_dir))}个md文件")
@@ -92,7 +101,7 @@ class ProcessorAPP:
         if not self.md_dir:
             return "请先解析PDF文件"
 
-        self.splitter = MarkdownDirSplitter(images_output_dir=r'E:\my_project\Multimodal_RAG\output\images')
+        self.splitter = MarkdownDirSplitter(images_output_dir=r'D:\code\Multimodal_RAG\output\images')
         result = self.splitter.process_md_dir(self.md_dir, self.pdf_path)
         res: List[Dict] = do_save_to_milvus(result)
         # 打印结果

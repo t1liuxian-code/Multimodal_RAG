@@ -8,6 +8,42 @@ from dots_ocr.utils.image_utils import PILimage_to_base64
 from openai import OpenAI
 import os
 
+from utils.env_utils import DASHSCOPE_API_KEY, DASHSCOPE_BASE_URL
+
+
+def inference_with_bailian_ocr(
+    image,
+    prompt,
+    model_name="qwen-vl-ocr-latest",
+    temperature=0.1,
+    top_p=0.9,
+    max_completion_tokens=8192,
+):
+    api_key = DASHSCOPE_API_KEY
+    base_url = DASHSCOPE_BASE_URL
+    client = OpenAI(api_key=api_key, base_url=base_url)
+
+    response = client.chat.completions.create(
+        model=model_name,
+        messages=[
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "image_url",
+                        "image_url": {"url": PILimage_to_base64(image)},
+                    },
+                    {"type": "text", "text": prompt},
+                ],
+            }
+        ],
+        temperature=temperature,
+        top_p=top_p,
+        max_completion_tokens=max_completion_tokens,
+        # 如果你要强制 OCR 任务可打开：
+        # extra_body={"parameters": {"ocr_options": {"task": "document_parsing"}}},
+    )
+    return response.choices[0].message.content
 
 def inference_with_vllm(
         image,

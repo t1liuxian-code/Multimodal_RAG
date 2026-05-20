@@ -5,9 +5,16 @@ pymilvus==2.6.0
 gradio
 loguru
 pillow
-PyMuPDF
 sentence_transformers
 frontend
 langchain-text-splitters
 dashscope
 ragas
+PyMuPDF
+openai
+qwen_vl_utils
+transformers==4.51.3
+huggingface_hub
+modelscope
+flash-attn==2.8.0.post2
+accelerate
